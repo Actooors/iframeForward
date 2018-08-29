@@ -18,22 +18,41 @@
   packages = [
     ".",
     "binding",
+    "json",
     "render"
   ]
-  revision = "d459835d2b077e44f7c9b453505ee29881d5d12d"
-  version = "v1.2"
+  revision = "b869fe1415e4b9eb52f247441830d502aece2d4d"
+  version = "v1.3.0"
 
 [[projects]]
   name = "github.com/golang/protobuf"
   packages = ["proto"]
-  revision = "b4deda0973fb4c70b50d226b1af49f3da59f5265"
-  version = "v1.1.0"
+  revision = "aa810b61a9c79d51363740d207bb46cf8e620ed5"
+  version = "v1.2.0"
+
+[[projects]]
+  name = "github.com/json-iterator/go"
+  packages = ["."]
+  revision = "1624edc4454b8682399def8740d46db5e4362ba4"
+  version = "v1.1.5"
 
 [[projects]]
   name = "github.com/mattn/go-isatty"
   packages = ["."]
   revision = "0360b2af4f38e8d38c7fce2a9f4e702702d73a39"
   version = "v0.0.3"
+
+[[projects]]
+  name = "github.com/modern-go/concurrent"
+  packages = ["."]
+  revision = "bacd9c7ef1dd9b15be4a9909b8ac7a4e313eec94"
+  version = "1.0.3"
+
+[[projects]]
+  name = "github.com/modern-go/reflect2"
+  packages = ["."]
+  revision = "4b7aa43c6742a2c18fdef89dd197aaae7dac7ccd"
+  version = "1.0.1"
 
 [[projects]]
   name = "github.com/ugorji/go"
@@ -45,7 +64,7 @@
   branch = "master"
   name = "golang.org/x/sys"
   packages = ["unix"]
-  revision = "7138fd3d9dc8335c567ca206f4333fb75eb05d56"
+  revision = "d99a578cf41bfccdeaf48b0845c823a4b8b0ad5e"
 
 [[projects]]
   name = "gopkg.in/go-playground/validator.v8"
@@ -62,6 +81,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "5f95d795b4a8e00aa4347ed166522b4e5ff264d9cbbd7df1a2b53ea7f0f31b38"
+  inputs-digest = "fc1e4d18831036ffea1e8a53762b3a50df63597df8ddc5f434bf79e5b975f738"
   solver-name = "gps-cdcl"
   solver-version = 1
