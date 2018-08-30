@@ -27,15 +27,15 @@ func main() {
 */
 func anyForward(ctx *gin.Context) {
 	url2 := ctx.Param("url")
-	/*
-		首次访问该站点，留下1个小时的cookie，实现具有一定粘性的反向代理
-	*/
 	type cookieSaver struct {
 		value  string
 		maxAge int
 		domain string
 	}
 	var cs *cookieSaver = nil
+	/*
+		首次访问该站点，留下1个小时的cookie，实现具有一定粘性的反向代理
+	*/
 	if strings.ToLower(url2) == FirstRequestPath {
 		url2 = ctx.Query("url")
 		host := getHostFromUrl(url2)
@@ -52,17 +52,14 @@ func anyForward(ctx *gin.Context) {
 	}
 	//是否是完整的url
 	ok := isCompleteURL(url2)
-	//并非完整的url，先从refer推断完整url
+	//并非完整的url
 	if !ok {
-		reg, _ := regexp.Compile(FirstRequestPath + `\?.*url=https?`)
+		//reg, _ := regexp.Compile(FirstRequestPath + `\?.*url=https?`)
 		refer := ctx.Request.Referer()
 		var site string
 		var err error
-		//先看是不是从反代站过来的
-		if reg.FindString(refer) != "" {
-			//直接从cookie取
-			site, err = ctx.Cookie("__forward_site")
-		}
+		//直接从cookie取
+		site, err = ctx.Cookie("__forward_site")
 		//cookie没有，尝试从refer取
 		if urlFromRefer := getHostFromUrl(refer); err != nil && isCompleteURL(urlFromRefer) {
 			site = getHostFromUrl(urlFromRefer)
@@ -85,6 +82,7 @@ func anyForward(ctx *gin.Context) {
 		ctx.Status(500)
 		return
 	}
+	//将友好的response头原原本本添加回去
 	for k, v := range res.Header {
 		switch k {
 		case "X-Frame-Options", "Access-Control-Allow-Origin", "Access-Control-Request-Method":
@@ -94,8 +92,8 @@ func anyForward(ctx *gin.Context) {
 			ctx.Header(k, val)
 		}
 	}
+	//加上跨域友好response头
 	ctx.Header("Access-Control-Allow-Origin", "*")
-	ctx.Header("Access-Control-Request-Method", "*")
 	if cs != nil {
 		ctx.SetCookie("__forward_site", cs.value, cs.maxAge, "/", cs.domain, false, false)
 	}
