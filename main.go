@@ -38,7 +38,7 @@ func anyForward(ctx *gin.Context) {
 	*/
 	if strings.ToLower(url2) == FirstRequestPath {
 		url2 = ctx.Query("url")
-		host := getHostFromUrl(url2)
+		host := getHostFromUrl(url2, true)
 		domain := ctx.Request.Host
 		if index := strings.Index(ctx.Request.Host, ":"); index > 0 {
 			domain = domain[:index]
@@ -61,8 +61,8 @@ func anyForward(ctx *gin.Context) {
 		//直接从cookie取
 		site, err = ctx.Cookie("__forward_site")
 		//cookie没有，尝试从refer取
-		if urlFromRefer := getHostFromUrl(refer); err != nil && isCompleteURL(urlFromRefer) {
-			site = getHostFromUrl(urlFromRefer)
+		if urlFromRefer := getHostFromUrl(refer, true); err != nil && isCompleteURL(urlFromRefer) {
+			site = getHostFromUrl(urlFromRefer, true)
 		}
 		url2 = site + url2
 	}
@@ -85,7 +85,10 @@ func anyForward(ctx *gin.Context) {
 	//将友好的response头原原本本添加回去
 	for k, v := range res.Header {
 		switch k {
-		case "X-Frame-Options", "Access-Control-Allow-Origin", "Access-Control-Request-Method":
+		case "X-Frame-Options",
+			"Access-Control-Allow-Origin",
+			"Access-Control-Request-Method",
+			"Host":
 			continue
 		}
 		for _, val := range v {
@@ -94,6 +97,8 @@ func anyForward(ctx *gin.Context) {
 	}
 	//加上跨域友好response头
 	ctx.Header("Access-Control-Allow-Origin", "*")
+	//将host改为目标域名，以防403
+	ctx.Header("Host", getHostFromUrl(url2, false))
 	if cs != nil {
 		ctx.SetCookie("__forward_site", cs.value, cs.maxAge, "/", cs.domain, false, false)
 	}
@@ -111,7 +116,7 @@ func isCompleteURL(url string) bool {
 	return ok
 }
 
-func getHostFromUrl(url string) (host string) {
+func getHostFromUrl(url string, includeProtocol bool) (host string) {
 	t := strings.Index(url, "//")
 	if t == -1 {
 		t = 0
@@ -121,6 +126,10 @@ func getHostFromUrl(url string) (host string) {
 	if e == -1 {
 		e = len(host)
 	}
-	host = url[:t+2] + host[:e]
+	if includeProtocol {
+		host = url[:t+2] + host[:e]
+	} else {
+		host = host[:e]
+	}
 	return
 }
