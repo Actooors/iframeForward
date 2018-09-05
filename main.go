@@ -105,7 +105,7 @@ func anyForward(ctx *gin.Context) {
 	buf := new(bytes.Buffer)
 	buf.ReadFrom(res.Body)
 	s := buf.String()
-	ctx.String(200, s)
+	ctx.String(res.StatusCode, s)
 }
 
 func isCompleteURL(url string) bool {
