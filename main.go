@@ -2,20 +2,25 @@ package main
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/gin-contrib/cors"
 	"net/http"
 	"bytes"
 	"time"
 	"strings"
 	"regexp"
 	"fmt"
+	"encoding/json"
+	"errors"
+	"database/sql"
 )
 
 const FirstRequestPath = "/getforward/get"
+const ApiRoot = "https://mzz.foryung.com/api"
+
+type siteUrl string
 
 func main() {
 	router := gin.Default()
-	router.Use(cors.Default())
+	//router.Use(cors.Default())
 	router.Use(gin.Recovery())
 	//router.GET("/getforward/get", getForward)
 	router.Any("*url", anyForward)
@@ -26,7 +31,6 @@ func main() {
 	转发所有请求到cookie标识的站点
 */
 func anyForward(ctx *gin.Context) {
-	fmt.Println("0")
 	url2 := ctx.Param("url")
 	type cookieSaver struct {
 		value  string
@@ -37,7 +41,6 @@ func anyForward(ctx *gin.Context) {
 	/*
 		首次访问该站点，留下1个小时的cookie，实现具有一定粘性的反向代理
 	*/
-	fmt.Println("1")
 	if strings.ToLower(url2) == FirstRequestPath {
 		url2 = ctx.Query("url")
 		host := getHostFromUrl(url2, true)
@@ -45,14 +48,13 @@ func anyForward(ctx *gin.Context) {
 		if index := strings.Index(ctx.Request.Host, ":"); index > 0 {
 			domain = domain[:index]
 		}
-		fmt.Print(ctx.Request.Host)
+		//fmt.Print(ctx.Request.Host)
 		cs = &cookieSaver{
 			value:  host,
 			maxAge: int(time.Hour),
 			domain: domain,
 		}
 	}
-	fmt.Println("1")
 	//是否是完整的url
 	ok := isCompleteURL(url2)
 	//并非完整的url
@@ -69,41 +71,52 @@ func anyForward(ctx *gin.Context) {
 		}
 		url2 = site + url2
 	}
-	fmt.Println("2")
 	raw, err := ctx.GetRawData()
 	if err != nil {
-		ctx.Status(500)
-                fmt.Println(err)
+		ctx.Status(503)
+		fmt.Println(err)
 		return
 	}
 	request, err := http.NewRequest(ctx.Request.Method, url2, bytes.NewReader(raw))
 	if err != nil {
-		ctx.Status(500)
-                fmt.Println(err)
+		ctx.Status(503)
+		fmt.Println(err)
 		return
 	}
 	request.Header = ctx.Request.Header
 	res, err := http.DefaultClient.Do(request)
 	if err != nil {
-		ctx.Status(500)
-                fmt.Println(err)
+		ctx.Status(503)
+		fmt.Println(err)
 		return
 	}
-	fmt.Println("3")
+	supportIframe := true
+	siteUrl := siteUrl(getHostFromUrl(url2, true))
 	//将友好的response头原原本本添加回去
 	for k, v := range res.Header {
 		switch k {
-		case "X-Frame-Options",
-			"Access-Control-Allow-Origin",
+		case "Access-Control-Allow-Origin",
 			"Access-Control-Request-Method",
 			"Host":
+			continue
+		case "X-Frame-Options":
+			err = siteUrl.changeSupportIframeSite(false)
+			if err != nil {
+				fmt.Println(err)
+			}
+			supportIframe = false
 			continue
 		}
 		for _, val := range v {
 			ctx.Header(k, val)
 		}
 	}
-	fmt.Println("4")
+	if supportIframe {
+		err = siteUrl.changeSupportIframeSite(true)
+		if err != nil {
+			fmt.Println(err)
+		}
+	}
 	//加上跨域友好response头
 	ctx.Header("Access-Control-Allow-Origin", "*")
 	//将host改为目标域名，以防403
@@ -114,8 +127,7 @@ func anyForward(ctx *gin.Context) {
 	buf := new(bytes.Buffer)
 	buf.ReadFrom(res.Body)
 	s := buf.String()
-	fmt.Println("5")
-	ctx.String(200, s)
+	ctx.String(res.StatusCode, s)
 }
 
 func isCompleteURL(url string) bool {
@@ -142,4 +154,36 @@ func getHostFromUrl(url string, includeProtocol bool) (host string) {
 		host = host[:e]
 	}
 	return
+}
+
+func (str *siteUrl) changeSupportIframeSite(support bool) (error) {
+	params := make(map[string]interface{})
+	params["host"] = str
+	params["support"] = support
+	data, err := json.Marshal(params)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequest("post", ApiRoot+"/common/newIframe", bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	buf := new(bytes.Buffer)
+	buf.ReadFrom(request.Body)
+	var res struct {
+		Code    string         `json:"code"`
+		Message sql.NullString `json:"message"`
+		Data    interface{}    `json:"data"`
+	}
+	err = json.Unmarshal(buf.Bytes(), &res)
+	if err != nil {
+		return err
+	}
+	if !res.Message.Valid {
+		return errors.New(buf.String())
+	}
+	if res.Code == "FAILED" {
+		return errors.New(res.Message.String)
+	}
+	return nil
 }
