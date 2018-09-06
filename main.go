@@ -10,11 +10,10 @@ import (
 	"fmt"
 	"encoding/json"
 	"errors"
-	"database/sql"
 )
 
 const FirstRequestPath = "/getforward/get"
-const ApiRoot = "https://mzz.foryung.com/api"
+const ApiRoot = "http://api.mzz.pub:8188/api"
 
 type siteUrl string
 
@@ -100,10 +99,12 @@ func anyForward(ctx *gin.Context) {
 			"Host":
 			continue
 		case "X-Frame-Options":
-			err = siteUrl.changeSupportIframeSite(false)
-			if err != nil {
-				fmt.Println(err)
-			}
+			go func() {
+				err = siteUrl.changeSupportIframeSite(false)
+				if err != nil {
+					fmt.Println("* When changeSupportIframeSite, ", err)
+				}
+			}()
 			supportIframe = false
 			continue
 		}
@@ -112,10 +113,12 @@ func anyForward(ctx *gin.Context) {
 		}
 	}
 	if supportIframe {
-		err = siteUrl.changeSupportIframeSite(true)
-		if err != nil {
-			fmt.Println(err)
-		}
+		go func() {
+			err = siteUrl.changeSupportIframeSite(true)
+			if err != nil {
+				fmt.Println("* When changeSupportIframeSite, ", err)
+			}
+		}()
 	}
 	//加上跨域友好response头
 	ctx.Header("Access-Control-Allow-Origin", "*")
@@ -164,26 +167,29 @@ func (str *siteUrl) changeSupportIframeSite(support bool) (error) {
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequest("post", ApiRoot+"/common/newIframe", bytes.NewReader(data))
+	request, err := http.NewRequest("POST", ApiRoot+"/common/newIframe", bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Accept", "application/json, text/plain, */*")
+	request.Header.Set("Content-Type", "application/json;charset=UTF-8")
+	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		return err
 	}
 	buf := new(bytes.Buffer)
-	buf.ReadFrom(request.Body)
+	buf.ReadFrom(response.Body)
 	var res struct {
-		Code    string         `json:"code"`
-		Message sql.NullString `json:"message"`
-		Data    interface{}    `json:"data"`
+		Code    string      `json:"code"`
+		Message string      `json:"message"`
+		Data    interface{} `json:"data"`
 	}
 	err = json.Unmarshal(buf.Bytes(), &res)
 	if err != nil {
-		return err
-	}
-	if !res.Message.Valid {
-		return errors.New(buf.String())
+		return errors.New(buf.String() + " | " + err.Error())
 	}
 	if res.Code == "FAILED" {
-		return errors.New(res.Message.String)
+		return errors.New(res.Message)
 	}
 	return nil
 }
