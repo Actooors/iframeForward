@@ -37,10 +37,12 @@ func anyForward(ctx *gin.Context) {
 		domain string
 	}
 	var cs *cookieSaver = nil
+	var firstAcess = false
 	/*
 		首次访问该站点，留下1个小时的cookie，实现具有一定粘性的反向代理
 	*/
 	if strings.ToLower(url2) == FirstRequestPath {
+		firstAcess = true
 		url2 = ctx.Query("url")
 		host := getHostFromUrl(url2, true)
 		domain := ctx.Request.Host
@@ -99,20 +101,22 @@ func anyForward(ctx *gin.Context) {
 			"Host":
 			continue
 		case "X-Frame-Options":
-			go func() {
-				err = siteUrl.changeSupportIframeSite(false)
-				if err != nil {
-					fmt.Println("* When changeSupportIframeSite, ", err)
-				}
-			}()
-			supportIframe = false
+			if firstAcess {
+				go func() {
+					err = siteUrl.changeSupportIframeSite(false)
+					if err != nil {
+						fmt.Println("* When changeSupportIframeSite, ", err)
+					}
+				}()
+				supportIframe = false
+			}
 			continue
 		}
 		for _, val := range v {
 			ctx.Header(k, val)
 		}
 	}
-	if supportIframe {
+	if firstAcess && supportIframe {
 		go func() {
 			err = siteUrl.changeSupportIframeSite(true)
 			if err != nil {
