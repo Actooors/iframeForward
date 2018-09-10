@@ -2,20 +2,26 @@ package main
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/gin-contrib/cors"
 	"net/http"
 	"bytes"
 	"time"
 	"strings"
 	"regexp"
 	"fmt"
+	"encoding/json"
+	"errors"
+	"log"
 )
 
+const selfHost = "http://api.mzz.pub:8090"
 const FirstRequestPath = "/getforward/get"
+const ApiRoot = "http://api.mzz.pub:8188/api"
+
+type siteUrl string
 
 func main() {
 	router := gin.Default()
-	router.Use(cors.Default())
+	//router.Use(cors.Default())
 	router.Use(gin.Recovery())
 	//router.GET("/getforward/get", getForward)
 	router.Any("*url", anyForward)
@@ -33,17 +39,19 @@ func anyForward(ctx *gin.Context) {
 		domain string
 	}
 	var cs *cookieSaver = nil
+	var firstAcess = false
 	/*
 		首次访问该站点，留下1个小时的cookie，实现具有一定粘性的反向代理
 	*/
 	if strings.ToLower(url2) == FirstRequestPath {
+		firstAcess = true
 		url2 = ctx.Query("url")
 		host := getHostFromUrl(url2, true)
 		domain := ctx.Request.Host
 		if index := strings.Index(ctx.Request.Host, ":"); index > 0 {
 			domain = domain[:index]
 		}
-		fmt.Print(ctx.Request.Host)
+		//fmt.Print(ctx.Request.Host)
 		cs = &cookieSaver{
 			value:  host,
 			maxAge: int(time.Hour),
@@ -61,39 +69,82 @@ func anyForward(ctx *gin.Context) {
 		//直接从cookie取
 		site, err = ctx.Cookie("__forward_site")
 		//cookie没有，尝试从refer取
-		if urlFromRefer := getHostFromUrl(refer, true); err != nil && isCompleteURL(urlFromRefer) {
-			site = getHostFromUrl(urlFromRefer, true)
+
+		if err != nil {
+			log.Println("cookie中没有site，从refer取得: ", site)
+			//先尝试是否refer的是/getForward/get接口
+			re, _ := regexp.Compile(`.*` + FirstRequestPath + `\?url=(.*)`)
+			result := re.FindStringSubmatch(refer)
+			if len(result) >= 2 {
+				site = getHostFromUrl(result[1], true)
+			} else {
+				//如果不是，尝试直接引用refer的site
+				urlFromRefer := getHostFromUrl(refer, true)
+				site = getHostFromUrl(urlFromRefer, true)
+			}
 		}
 		url2 = site + url2
+		if site == selfHost {
+			ctx.Status(503)
+			log.Println("error: site与本站相同", ctx.Request.Header)
+			return
+		}
+		log.Println("合成url: ", url2)
 	}
 	raw, err := ctx.GetRawData()
 	if err != nil {
-		ctx.Status(500)
+		ctx.Status(503)
+		fmt.Println(err)
 		return
 	}
 	request, err := http.NewRequest(ctx.Request.Method, url2, bytes.NewReader(raw))
 	if err != nil {
-		ctx.Status(500)
+		ctx.Status(503)
+		fmt.Println(err)
 		return
 	}
+	defer request.Body.Close()
 	request.Header = ctx.Request.Header
 	res, err := http.DefaultClient.Do(request)
 	if err != nil {
-		ctx.Status(500)
+		ctx.Status(503)
+		fmt.Println(err)
 		return
 	}
+	defer res.Body.Close()
+	supportIframe := true
+	siteUrl := siteUrl(getHostFromUrl(url2, true))
 	//将友好的response头原原本本添加回去
 	for k, v := range res.Header {
+		log.Println("here: ", k, v)
 		switch k {
-		case "X-Frame-Options",
-			"Access-Control-Allow-Origin",
+		case "Access-Control-Allow-Origin",
 			"Access-Control-Request-Method",
 			"Host":
+			continue
+		case "X-Frame-Options":
+			if firstAcess {
+				go func() {
+					err := siteUrl.changeSupportIframeSite(false)
+					if err != nil {
+						fmt.Println("* When changeSupportIframeSite, ", err)
+					}
+				}()
+				supportIframe = false
+			}
 			continue
 		}
 		for _, val := range v {
 			ctx.Header(k, val)
 		}
+	}
+	if firstAcess && supportIframe {
+		go func() {
+			err := siteUrl.changeSupportIframeSite(true)
+			if err != nil {
+				fmt.Println("* When changeSupportIframeSite, ", err)
+			}
+		}()
 	}
 	//加上跨域友好response头
 	ctx.Header("Access-Control-Allow-Origin", "*")
@@ -119,7 +170,8 @@ func isCompleteURL(url string) bool {
 func getHostFromUrl(url string, includeProtocol bool) (host string) {
 	t := strings.Index(url, "//")
 	if t == -1 {
-		t = 0
+		//令t+2=0
+		t = -2
 	}
 	host = url[t+2:]
 	e := strings.Index(host, "/")
@@ -132,4 +184,41 @@ func getHostFromUrl(url string, includeProtocol bool) (host string) {
 		host = host[:e]
 	}
 	return
+}
+
+func (str *siteUrl) changeSupportIframeSite(support bool) (error) {
+	params := make(map[string]interface{})
+	params["host"] = str
+	params["support"] = support
+	data, err := json.Marshal(params)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequest("POST", ApiRoot+"/common/newIframe", bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	defer request.Body.Close()
+	request.Header.Set("Accept", "application/json, text/plain, */*")
+	request.Header.Set("Content-Type", "application/json;charset=UTF-8")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	buf := new(bytes.Buffer)
+	buf.ReadFrom(response.Body)
+	var res struct {
+		Code    string      `json:"code"`
+		Message string      `json:"message"`
+		Data    interface{} `json:"data"`
+	}
+	err = json.Unmarshal(buf.Bytes(), &res)
+	if err != nil {
+		return errors.New(buf.String() + " | " + err.Error())
+	}
+	if res.Code == "FAILED" {
+		return errors.New(res.Message)
+	}
+	return nil
 }
