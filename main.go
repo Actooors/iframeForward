@@ -32,7 +32,14 @@ func main() {
 	转发所有请求到cookie标识的站点
 */
 func anyForward(ctx *gin.Context) {
-	url2 := ctx.Param("url")
+	url2 := strings.ToLower(ctx.Param("url"))
+	//判断是否为max-width-limit-[0-9]+.css
+	reg, _ := regexp.Compile(`^/max-width-limit-(\d+).css$`)
+	if limit := reg.FindStringSubmatch(url2); limit != nil {
+		ctx.Header("Content-Type", "text/css")
+		ctx.String(200, fmt.Sprintf("p{max-width:%spx!important}", limit))
+		return
+	}
 	type cookieSaver struct {
 		value  string
 		maxAge int
@@ -43,7 +50,7 @@ func anyForward(ctx *gin.Context) {
 	/*
 		首次访问该站点，留下1个小时的cookie，实现具有一定粘性的反向代理
 	*/
-	if strings.ToLower(url2) == FirstRequestPath {
+	if url2 == FirstRequestPath {
 		firstAcess = true
 		url2 = ctx.Query("url")
 		host := getHostFromUrl(url2, true)
@@ -151,7 +158,7 @@ func anyForward(ctx *gin.Context) {
 	//将host改为目标域名，以防403
 	ctx.Header("Host", getHostFromUrl(url2, false))
 	if cs != nil {
-		ctx.SetCookie("__forward_site", cs.value, cs.maxAge, "/", cs.domain, false, false)
+		ctx.SetCookie("__forward_site", cs.value, cs.maxAge, "/", cs.domain, false, true)
 	}
 	buf := new(bytes.Buffer)
 	buf.ReadFrom(res.Body)
@@ -221,4 +228,12 @@ func (str *siteUrl) changeSupportIframeSite(support bool) (error) {
 		return errors.New(res.Message)
 	}
 	return nil
+}
+
+func addWidthLimit(s string, limit string) string {
+	r := regexp.MustCompile(`(?i)<head.*>`)
+	l := r.FindStringIndex(s)
+	LINK := fmt.Sprintf(`<link rel="stylesheet" type="text/css" href="%s/max-width-limit-%s.css"`, selfHost, limit)
+	//将其加到<head>之后
+	return s[:l[1]] + "\n" + LINK + s[l[1]:]
 }
