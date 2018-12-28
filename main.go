@@ -40,7 +40,7 @@ func anyForward(ctx *gin.Context) {
 	reg, _ := regexp.Compile(`^/max-width-limit-(\d+).css$`)
 	if limit := reg.FindStringSubmatch(url2); limit != nil {
 		ctx.Header("Content-Type", "text/css")
-		ctx.String(200, fmt.Sprintf("p{max-width:%spx!important;}", limit[1]))
+		ctx.String(200, fmt.Sprintf(`p{max-width:%spx!important;margin-left: auto!important;margin-right: auto!important;}`, limit[1]))
 		return
 	}
 	type cookieSaver struct {
@@ -169,7 +169,8 @@ func anyForward(ctx *gin.Context) {
 	buf := new(bytes.Buffer)
 	var s string
 	//添加viewport支持和p标签宽度限制
-	if ct := res.Header.Get("Content-Type"); strings.ToLower(ct) == "text/html" {
+
+	if ct := res.Header.Get("Content-Type"); strings.Index(strings.ToLower(ct), "text/html") > -1 {
 		if ce := res.Header.Get("Content-Encoding"); strings.ToLower(ce) == "gzip" {
 			//gzip解压
 			r, _ := gzip.NewReader(res.Body)
