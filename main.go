@@ -12,10 +12,12 @@ import (
 	"errors"
 	"log"
 	"compress/gzip"
+	"github.com/gin-contrib/cors"
 )
 
 //const selfHost = "http://api.mzz.pub:8090"
-var selfHost = []string{"0.0.0.0:8090", "api.mzz.pub:8090", "192.168.50.111:8090"}
+var selfHost = []string{"0.0.0.0:8090", "api.mzz.pub:8090", "192.168.50.111:8090", "proxy.shumsg.cn"}
+var frontHost = []string{"api.mzz.pub:8000", "shumsg.cn"}
 
 const FirstRequestPath = "/getforward/get"
 const ApiRoot = "http://api.mzz.pub:8188/api"
@@ -24,7 +26,15 @@ type siteUrl string
 
 func main() {
 	router := gin.Default()
-	//router.Use(cors.Default())
+	trustHosts := make([]string, len(frontHost)*2)
+	for i, t := range frontHost {
+		trustHosts[2*i] = "http://" + t
+		trustHosts[2*i+1] = "https://" + t
+	}
+	fmt.Println(trustHosts)
+	corsConfig := cors.DefaultConfig()
+	corsConfig.AllowOrigins = trustHosts
+	router.Use(cors.New(corsConfig))
 	router.Use(gin.Recovery())
 	//router.GET("/getforward/get", getForward)
 	router.Any("*uri", anyForward)
@@ -159,8 +169,8 @@ func anyForward(ctx *gin.Context) {
 			}
 		}()
 	}
-	//加上跨域友好response头
-	ctx.Header("Access-Control-Allow-Origin", "*")
+	////加上跨域友好response头
+	//ctx.Header("Access-Control-Allow-Origin", "*")
 	//将host改为目标域名，以防403
 	ctx.Header("Host", getHostFromUrl(url2, false))
 	if cs != nil {
@@ -169,7 +179,6 @@ func anyForward(ctx *gin.Context) {
 	buf := new(bytes.Buffer)
 	var s string
 	//添加viewport支持和p标签宽度限制
-
 	if ct := res.Header.Get("Content-Type"); strings.Index(strings.ToLower(ct), "text/html") > -1 {
 		if ce := res.Header.Get("Content-Encoding"); strings.ToLower(ce) == "gzip" {
 			//gzip解压
