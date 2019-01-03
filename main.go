@@ -63,9 +63,9 @@ func anyForward(ctx *gin.Context) {
 	/*
 		首次访问该站点，留下1个小时的cookie，实现具有一定粘性的反向代理
 	*/
-	if url2 == FirstRequestPath {
+	if ctx.Request.URL.Path == FirstRequestPath && strings.HasPrefix(ctx.Request.URL.RawQuery, "__url=") {
 		firstAcess = true
-		url2 = ctx.Query("url")
+		url2 = ctx.Query("__url")
 		host := getHostFromUrl(url2, true)
 		domain := ctx.Request.Host
 		if index := strings.Index(ctx.Request.Host, ":"); index > 0 {
@@ -82,7 +82,7 @@ func anyForward(ctx *gin.Context) {
 	ok := isCompleteURL(url2)
 	//并非完整的url
 	if !ok {
-		//reg, _ := regexp.Compile(FirstRequestPath + `\?.*url=https?`)
+		//reg, _ := regexp.Compile(FirstRequestPath + `\?.*url=__https?`)
 		refer := ctx.Request.Referer()
 		var site string
 		var err error
@@ -93,7 +93,7 @@ func anyForward(ctx *gin.Context) {
 		if err != nil {
 			log.Println("cookie中没有site，从refer取得: ", site)
 			//先尝试是否refer的是/getForward/get接口
-			re, _ := regexp.Compile(`.*` + FirstRequestPath + `\?url=(.*)`)
+			re, _ := regexp.Compile(`.*` + FirstRequestPath + `\?__url=(.*)`)
 			result := re.FindStringSubmatch(refer)
 			if len(result) >= 2 {
 				site = getHostFromUrl(result[1], true)
