@@ -11,11 +11,10 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
-	"compress/gzip"
 	"github.com/gin-contrib/cors"
+	"github.com/Actooors/iframeForward/presetHandlers"
 )
 
-//const selfHost = "http://api.mzz.pub:8090"
 var selfHost = []string{"0.0.0.0:8090", "api.mzz.pub:8090", "192.168.50.111:8090", "proxy.shumsg.cn"}
 var frontHost = []string{"api.mzz.pub:8000", "shumsg.cn"}
 
@@ -24,7 +23,11 @@ const ApiRoot = "http://api.mzz.pub:8188/api"
 
 type siteUrl string
 
+var responseHandlersChain ResponseHandlersChain
+
 func main() {
+	responseHandlersChain.responseBodyUse(presetHandlers.ViewportHandler(), presetHandlers.WidthLimitHandler())
+
 	router := gin.Default()
 	trustHosts := make([]string, len(frontHost)*2)
 	for i, t := range frontHost {
@@ -36,7 +39,6 @@ func main() {
 	corsConfig.AllowOrigins = trustHosts
 	router.Use(cors.New(corsConfig))
 	router.Use(gin.Recovery())
-	//router.GET("/getforward/get", getForward)
 	router.Any("*uri", anyForward)
 	router.Run(":8090")
 }
@@ -46,13 +48,6 @@ func main() {
 */
 func anyForward(ctx *gin.Context) {
 	url2 := ctx.Param("uri")
-	//判断是否为max-width-limit-[0-9]+.css
-	reg, _ := regexp.Compile(`^/max-width-limit-(\d+).css$`)
-	if limit := reg.FindStringSubmatch(url2); limit != nil {
-		ctx.Header("Content-Type", "text/css")
-		ctx.String(200, fmt.Sprintf(`p{max-width:%spx!important;margin-left: auto!important;margin-right: auto!important;}`, limit[1]))
-		return
-	}
 	type cookieSaver struct {
 		value  string
 		maxAge int
@@ -114,24 +109,22 @@ func anyForward(ctx *gin.Context) {
 		}
 		//log.Println("合成url: ", url2, getHostFromUrl(site, false), selfHost)
 	}
+	//开始转发请求
 	raw, err := ctx.GetRawData()
 	if err != nil {
-		ctx.Status(503)
-		fmt.Println(err)
+		handleError(ctx, err)
 		return
 	}
 	request, err := http.NewRequest(ctx.Request.Method, url2, bytes.NewReader(raw))
 	if err != nil {
-		ctx.Status(503)
-		fmt.Println(err)
+		handleError(ctx, err)
 		return
 	}
 	defer request.Body.Close()
 	request.Header = ctx.Request.Header
 	res, err := http.DefaultClient.Do(request)
 	if err != nil {
-		ctx.Status(503)
-		fmt.Println(err)
+		handleError(ctx, err)
 		return
 	}
 	defer res.Body.Close()
@@ -145,6 +138,7 @@ func anyForward(ctx *gin.Context) {
 			"Access-Control-Request-Method",
 			"Host":
 			continue
+			//该站点由于有X-Frame-Options首部，因此不支持iframe，我们在数据库对它进行记录
 		case "X-Frame-Options":
 			if firstAcess {
 				go func() {
@@ -169,52 +163,29 @@ func anyForward(ctx *gin.Context) {
 			}
 		}()
 	}
-	////加上跨域友好response头
-	//ctx.Header("Access-Control-Allow-Origin", "*")
 	//将host改为目标域名，以防403
 	ctx.Header("Host", getHostFromUrl(url2, false))
 	if cs != nil {
 		ctx.SetCookie("__forward_site", cs.value, cs.maxAge, "/", cs.domain, false, true)
 	}
-	buf := new(bytes.Buffer)
-	var s string
-	//添加viewport支持和p标签宽度限制
-	if ct := res.Header.Get("Content-Type"); strings.Index(strings.ToLower(ct), "text/html") > -1 {
-		if ce := res.Header.Get("Content-Encoding"); strings.ToLower(ce) == "gzip" {
-			//gzip解压
-			r, _ := gzip.NewReader(res.Body)
-			defer r.Close()
-			buf.ReadFrom(r)
-		} else {
-			buf.ReadFrom(res.Body)
+	//调用responseHandlersChain上的Handlers
+	for _, r := range responseHandlersChain {
+		r.handler(ctx, res)
+		if ctx.IsAborted() {
+			return
 		}
-		s = buf.String()
-		//添加viewport支持
-		s = addViewportSupport(s)
-		//添加p标签宽度限制
-		if limit := ctx.Query("limit"); limit != "" {
-			s = addWidthLimit(s, ctx.Query("limit"), siteUrl)
+	}
+	for _, r := range responseHandlersChain {
+		if callback := r.deferCallbackFunc; callback != nil {
+			(*callback)()
 		}
-		//gzip压缩
-		if ce := res.Header.Get("Content-Encoding"); ce != "gzip" {
-			ctx.Header("Content-Encoding", "gzip")
-		}
-		buf.Reset()
-		gw := gzip.NewWriter(buf)
-		defer gw.Close()
-		gw.Write([]byte(s))
-		gw.Flush()
-		s = buf.String()
-		ctx.Header("Content-Length", fmt.Sprint(buf.Len()))
-	} else {
+	}
+	//没有什么callback对内容进行了写操作，就直接将response的body返回
+	if !ctx.Writer.Written() {
+		buf := new(bytes.Buffer)
 		buf.ReadFrom(res.Body)
-		s = buf.String()
+		ctx.Data(res.StatusCode, res.Header.Get("Content-Type"), buf.Bytes())
 	}
-	//log.Println(s, len(s))
-	if res.StatusCode == 404 {
-		log.Println("404 not found", url2)
-	}
-	ctx.String(res.StatusCode, s)
 }
 
 func isCompleteURL(url string) bool {
@@ -280,30 +251,7 @@ func (str *siteUrl) changeSupportIframeSite(support bool) (error) {
 	}
 	return nil
 }
-
-/*添加p标签宽度限制*/
-func addWidthLimit(s, limit string, host siteUrl) string {
-	r := regexp.MustCompile(`(?i)<head.*>`)
-	l := r.FindStringIndex(s)
-	LINK := fmt.Sprintf(`<link rel="stylesheet" type="text/css" href="/max-width-limit-%s.css">`, limit)
-	//将其加到<head>之后
-	return s[:l[1]] + LINK + s[l[1]:]
-}
-
-func addViewportSupport(HTML string) string {
-	const META = `<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=0">`
-	reg, _ := regexp.Compile(`<head.*?>[\S\s]*?(<meta.*?name="viewport".*?>)`)
-	loc := reg.FindStringSubmatchIndex(HTML)
-	var ns string
-	if len(loc) > 0 {
-		//存在viewport标签，将其替换
-		ns = HTML[:loc[2]] + META + HTML[loc[3]:]
-	} else {
-		reg, _ := regexp.Compile(`<head.*?>`)
-		if loc := reg.FindStringIndex(HTML); len(loc) > 0 {
-			//不存在viewport标签，将其加入head
-			ns = HTML[:loc[1]] + "\n  " + META + HTML[loc[1]:]
-		}
-	}
-	return ns
+func handleError(ctx *gin.Context, err error) {
+	ctx.Status(503)
+	fmt.Println(err)
 }
