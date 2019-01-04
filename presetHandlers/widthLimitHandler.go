@@ -31,8 +31,10 @@ func WidthLimitHandler() func(*gin.Context, *http.Response, *string) *string {
 /*添加p标签宽度限制*/
 func addWidthLimit(s, limit string) string {
 	r := regexp.MustCompile(`(?i)<head.*>`)
-	l := r.FindStringIndex(s)
-	LINK := fmt.Sprintf(`<link rel="stylesheet" type="text/css" href="/max-width-limit-%s.css">`, limit)
-	//将其加到<head>之后
-	return s[:l[1]] + LINK + s[l[1]:]
+	if l := r.FindStringIndex(s); len(l) > 0 {
+		LINK := fmt.Sprintf(`<link rel="stylesheet" type="text/css" href="/max-width-limit-%s.css">`, limit)
+		//将其加到<head>之后
+		return s[:l[1]] + LINK + s[l[1]:]
+	}
+	return s
 }
