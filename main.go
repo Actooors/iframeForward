@@ -13,6 +13,7 @@ import (
 	"log"
 	"github.com/gin-contrib/cors"
 	"github.com/Actooors/iframeForward/presetHandlers"
+	"github.com/Actooors/iframeForward/shumsgHandlers"
 )
 
 var selfHost = []string{"0.0.0.0:8090", "api.mzz.pub:8090", "192.168.50.111:8090", "proxy.shumsg.cn"}
@@ -26,7 +27,11 @@ type siteUrl string
 var responseHandlersChain ResponseHandlersChain
 
 func main() {
-	responseHandlersChain.responseBodyUse(presetHandlers.ViewportHandler(), presetHandlers.WidthLimitHandler())
+	responseHandlersChain.responseBodyUse(
+		presetHandlers.ViewportHandler(),
+		presetHandlers.WidthLimitHandler(),
+		shumsgHandlers.SeoNormalizeHandler(),
+	)
 
 	router := gin.Default()
 	trustHosts := make([]string, len(frontHost)*2)
