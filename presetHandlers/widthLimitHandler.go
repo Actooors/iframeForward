@@ -4,10 +4,11 @@ import (
 	"regexp"
 	"fmt"
 	"github.com/gin-gonic/gin"
+	"net/http"
 )
 
-func WidthLimitHandler() func(ctx *gin.Context, res *string) *string {
-	return func(ctx *gin.Context, res *string) *string {
+func WidthLimitHandler() func(*gin.Context, *http.Response, *string) *string {
+	return func(ctx *gin.Context, res *http.Response, body *string) *string {
 		r := ""
 		//判断是否为max-width-limit-[0-9]+.css, 是的话返回一个css文件
 		reg, _ := regexp.Compile(`^/max-width-limit-(\d+).css$`)
@@ -19,7 +20,7 @@ func WidthLimitHandler() func(ctx *gin.Context, res *string) *string {
 			return &r
 		}
 		//给<head></head>里面加一个<link/>样式表
-		r = *res
+		r = *body
 		if limit := ctx.Query("limit"); limit != "" {
 			r = addWidthLimit(r, ctx.Query("limit"))
 		}

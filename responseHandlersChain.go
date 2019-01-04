@@ -31,7 +31,7 @@ func (chain *ResponseHandler) deferCallback(callback func()) {
 /*
 目前版本，如果response经过压缩，只支持gzip方式解压，并且最终会对内容进行gzip压缩
 */
-type responseBodyHandlerFunc func(*gin.Context, *string) *string
+type responseBodyHandlerFunc func(*gin.Context, *http.Response, *string) *string
 
 func (chain *ResponseHandlersChain) responseBodyUse(handlers ...responseBodyHandlerFunc) {
 	var callback func() = nil
@@ -53,7 +53,7 @@ func (chain *ResponseHandlersChain) responseBodyUse(handlers ...responseBodyHand
 			ctx.Status(InitialStatus)
 			//调用handlers
 			for _, handler := range handlers {
-				if r := handler(ctx, &s); r != nil {
+				if r := handler(ctx, res, &s); r != nil {
 					s = *r
 				}
 			}

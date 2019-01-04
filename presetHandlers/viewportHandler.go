@@ -3,11 +3,12 @@ package presetHandlers
 import (
 	"regexp"
 	"github.com/gin-gonic/gin"
+	"net/http"
 )
 
-func ViewportHandler() func(ctx *gin.Context, res *string) *string {
-	return func(ctx *gin.Context, res *string) *string {
-		r := addViewportSupport(*res)
+func ViewportHandler() func(*gin.Context, *http.Response, *string) *string {
+	return func(ctx *gin.Context, res *http.Response, body *string) *string {
+		r := addViewportSupport(*body)
 		return &r
 	}
 }
