@@ -3,11 +3,16 @@ package shumsgHandlers
 import (
 	"regexp"
 	"github.com/gin-gonic/gin"
+	"net/http"
+	"strings"
 )
 
-func SeoNormalizeHandler() func(ctx *gin.Context, res *string) *string {
-	return func(ctx *gin.Context, res *string) *string {
-		r := addSeoNormalize(*res)
+func SeoNormalizeHandler() func(*gin.Context, *http.Response, *string) *string {
+	return func(ctx *gin.Context, res *http.Response, body *string) *string {
+		r := *body
+		if strings.HasSuffix(res.Request.URL.Host, "shu.edu.cn") {
+			r = addSeoNormalize(*body)
+		}
 		return &r
 	}
 }
