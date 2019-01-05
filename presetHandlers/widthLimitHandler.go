@@ -27,7 +27,7 @@ window.addEventListener('load',function(){
          return false;
      }
      //如果是iphone,ipad，则重新修改body宽度值
-     document.body.style.width = (window.screen.availWidth/document.body.clientWidth)*100+'%';
+     document.body.style.width = Math.min(window.screen.availWidth/document.body.clientWidth, document.body.clientWidth/window.screen.availWidth)*100+'%';
      document.body.style.overflow = 'scroll';
 })
 `)

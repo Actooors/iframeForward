@@ -61,6 +61,7 @@ func preHandler(ctx *gin.Context) {
 		seoNormalize.mutex.Lock()
 		if seoNormalize.content == "" {
 			res, err := http.Get("https://shumsg.cn/static/seoNormalize.css")
+			//res, err := http.Get("http://localhost:8688/static/seoNormalize.css")
 			if err == nil {
 				seoNormalize.header = res.Header
 				b, _ := ioutil.ReadAll(res.Body)
@@ -92,6 +93,7 @@ func preHandler(ctx *gin.Context) {
 		ctx.Header("Location", getCompleteOriginURL(ctx, true))
 
 		ctx.AbortWithStatus(302)
+		return
 	}
 }
 
