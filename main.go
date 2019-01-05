@@ -51,22 +51,26 @@ func main() {
 }
 
 var seoNormalize struct {
-	once    sync.Once
+	mutex   sync.Mutex
 	header  http.Header
 	content string
 }
 
 func preHandler(ctx *gin.Context) {
 	if ctx.Request.URL.Path == "/static/seoNormalize.css" {
+		seoNormalize.mutex.Lock()
 		if seoNormalize.content == "" {
-			seoNormalize.once.Do(func() {
-				res, _ := http.Get("https://shumsg.cn/static/seoNormalize.css")
-				defer res.Body.Close()
+			res, err := http.Get("https://shumsg.cn/static/seoNormalize.css")
+			if err == nil {
 				seoNormalize.header = res.Header
 				b, _ := ioutil.ReadAll(res.Body)
 				seoNormalize.content = string(b)
-			})
+				res.Body.Close()
+			} else {
+				println(err)
+			}
 		}
+		seoNormalize.mutex.Unlock()
 		//写header
 		for k, v := range seoNormalize.header {
 			for _, h := range v {
@@ -81,6 +85,7 @@ func preHandler(ctx *gin.Context) {
 		ctx.String(200, strings.Replace(seoNormalize.content, `-100vw`, limit, -1))
 
 		ctx.Abort()
+		return
 	}
 	r := regexp.MustCompile(`(?i)\.jpg|\.jpeg|\.png|\.gif|\.css|\.js`)
 	if l := r.FindStringIndex(ctx.Request.URL.Path); len(l) > 0 {
@@ -106,7 +111,7 @@ func anyForward(ctx *gin.Context) {
 	/*
 		首次访问该站点，留下1个小时的cookie，实现具有一定粘性的反向代理
 	*/
-	if ctx.Request.URL.Path == FirstRequestPath && strings.HasPrefix(ctx.Request.URL.RawQuery, "__url=") {
+	if strings.HasPrefix(ctx.Request.RequestURI, FirstRequestPath) {
 		firstAcess = true
 		url2 = ctx.Query("__url")
 		host := getHostFromUrl(url2, true)
@@ -183,6 +188,12 @@ func anyForward(ctx *gin.Context) {
 	}
 	//将host改为目标域名，以防403
 	ctx.Header("Host", getHostFromUrl(url2, false))
+	//将Cache-Control改为no-cache，以保证FirstRequestPath被率先访问，以记录正确的cookie(__forward_site)
+	//TODO:建议将页面response存进redis
+	if strings.HasPrefix(ctx.Request.RequestURI, FirstRequestPath) {
+		ctx.Header("Cache-Control", "no-cache")
+	}
+
 	if cs != nil {
 		ctx.SetCookie("__forward_site", cs.originSite, cs.maxAge, "/", cs.domain, false, true)
 		ctx.SetCookie("__width_limit", cs.widthLimit+`px`, cs.maxAge, "/", cs.domain, false, true)
