@@ -7,10 +7,10 @@ import (
 	"strings"
 )
 
-func CSSLinkHandler(src string) func(*gin.Context, *http.Response, *string) *string {
+func CSSLinkHandler(src string, hostSuffix string) func(*gin.Context, *http.Response, *string) *string {
 	return func(ctx *gin.Context, res *http.Response, body *string) *string {
 		r := *body
-		if strings.HasSuffix(res.Request.URL.Host, "shu.edu.cn") {
+		if strings.HasSuffix(res.Request.URL.Host, hostSuffix) {
 			r = addCSSLink(r, src)
 		}
 		return &r
