@@ -4,19 +4,21 @@ import (
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"bytes"
-	"time"
 	"strings"
 	"regexp"
 	"fmt"
 	"encoding/json"
 	"errors"
-	"log"
 	"github.com/gin-contrib/cors"
 	"github.com/Actooors/iframeForward/presetHandlers"
-	"github.com/Actooors/iframeForward/shumsgHandlers"
+	"github.com/modern-go/reflect2"
+	"sync"
+	"time"
+	"log"
+	"io/ioutil"
 )
 
-var selfHost = []string{"0.0.0.0:8090", "api.mzz.pub:8090", "192.168.50.111:8090", "proxy.shumsg.cn"}
+var selfHost = []string{"0.0.0.0:8090", "api.mzz.pub:8090", "192.168.50.111:8090", "proxy.shumsg.cn", "localhost:8090"}
 var frontHost = []string{"api.mzz.pub:8000", "shumsg.cn"}
 
 const FirstRequestPath = "/getforward/get"
@@ -27,12 +29,6 @@ type siteUrl string
 var responseHandlersChain ResponseHandlersChain
 
 func main() {
-	responseHandlersChain.responseBodyUse(
-		presetHandlers.ViewportHandler(),
-		presetHandlers.WidthLimitHandler(),
-		shumsgHandlers.SeoNormalizeHandler(),
-	)
-
 	router := gin.Default()
 	trustHosts := make([]string, len(frontHost)*2)
 	for i, t := range frontHost {
@@ -44,8 +40,54 @@ func main() {
 	corsConfig.AllowOrigins = trustHosts
 	router.Use(cors.New(corsConfig))
 	router.Use(gin.Recovery())
-	router.Any("*uri", anyForward)
+	router.Any("*uri", preHandler, anyForward)
+	//handlers插件使用示例
+	responseHandlersChain.responseBodyUse(
+		presetHandlers.ViewportHandler(),
+		presetHandlers.WidthLimitHandler(),
+		presetHandlers.CSSLinkHandler("/static/seoNormalize.css"),
+	)
 	router.Run(":8090")
+}
+
+var seoNormalize struct {
+	once    sync.Once
+	header  http.Header
+	content string
+}
+
+func preHandler(ctx *gin.Context) {
+	if ctx.Request.URL.Path == "/static/seoNormalize.css" {
+		if seoNormalize.content == "" {
+			seoNormalize.once.Do(func() {
+				res, _ := http.Get("https://shumsg.cn/static/seoNormalize.css")
+				defer res.Body.Close()
+				seoNormalize.header = res.Header
+				b, _ := ioutil.ReadAll(res.Body)
+				seoNormalize.content = string(b)
+			})
+		}
+		//写header
+		for k, v := range seoNormalize.header {
+			for _, h := range v {
+				ctx.Header(k, h)
+			}
+		}
+		limit, err := ctx.Cookie("__width_limit")
+		if err != nil || strings.TrimSpace(limit) == "" {
+			limit = "100vw"
+		}
+		//将标识-100vw替换为limit
+		ctx.String(200, strings.Replace(seoNormalize.content, `-100vw`, limit, -1))
+
+		ctx.Abort()
+	}
+	r := regexp.MustCompile(`(?i)\.jpg|\.jpeg|\.png|\.gif|\.css|\.js`)
+	if l := r.FindStringIndex(ctx.Request.URL.Path); len(l) > 0 {
+		ctx.Header("Location", getCompleteOriginURL(ctx, true))
+
+		ctx.AbortWithStatus(302)
+	}
 }
 
 /*
@@ -54,9 +96,10 @@ func main() {
 func anyForward(ctx *gin.Context) {
 	url2 := ctx.Param("uri")
 	type cookieSaver struct {
-		value  string
-		maxAge int
-		domain string
+		originSite string
+		widthLimit string
+		maxAge     int
+		domain     string
 	}
 	var cs *cookieSaver = nil
 	var firstAcess = false
@@ -72,47 +115,16 @@ func anyForward(ctx *gin.Context) {
 			domain = domain[:index]
 		}
 		//fmt.Print(ctx.Request.Host)
+		limit, _ := ctx.GetQuery("limit")
 		cs = &cookieSaver{
-			value:  host,
-			maxAge: int(time.Hour),
-			domain: domain,
+			originSite: host,
+			widthLimit: limit,
+			maxAge:     int(time.Hour),
+			domain:     domain,
 		}
 	}
-	//是否是完整的url
-	ok := isCompleteURL(url2)
-	//并非完整的url
-	if !ok {
-		//reg, _ := regexp.Compile(FirstRequestPath + `\?.*url=__https?`)
-		refer := ctx.Request.Referer()
-		var site string
-		var err error
-		//直接从cookie取
-		site, err = ctx.Cookie("__forward_site")
-		//cookie没有，尝试从refer取
-
-		if err != nil {
-			log.Println("cookie中没有site，从refer取得: ", site)
-			//先尝试是否refer的是/getForward/get接口
-			re, _ := regexp.Compile(`.*` + FirstRequestPath + `\?__url=(.*)`)
-			result := re.FindStringSubmatch(refer)
-			if len(result) >= 2 {
-				site = getHostFromUrl(result[1], true)
-			} else {
-				//如果不是，尝试直接引用refer的site
-				urlFromRefer := getHostFromUrl(refer, true)
-				site = getHostFromUrl(urlFromRefer, true)
-			}
-		}
-		url2 = site + url2
-		h := getHostFromUrl(site, false)
-		for _, self := range selfHost {
-			if h == self {
-				ctx.Status(503)
-				log.Println("error: site与本站相同", ctx.Request.Header)
-				return
-			}
-		}
-		//log.Println("合成url: ", url2, getHostFromUrl(site, false), selfHost)
+	if !isCompleteURL(url2) {
+		url2 = getCompleteOriginURL(ctx, true)
 	}
 	//开始转发请求
 	raw, err := ctx.GetRawData()
@@ -126,6 +138,7 @@ func anyForward(ctx *gin.Context) {
 		return
 	}
 	defer request.Body.Close()
+	//ctx.Request.Header.Del("If-None-Match")
 	request.Header = ctx.Request.Header
 	res, err := http.DefaultClient.Do(request)
 	if err != nil {
@@ -171,24 +184,29 @@ func anyForward(ctx *gin.Context) {
 	//将host改为目标域名，以防403
 	ctx.Header("Host", getHostFromUrl(url2, false))
 	if cs != nil {
-		ctx.SetCookie("__forward_site", cs.value, cs.maxAge, "/", cs.domain, false, true)
+		ctx.SetCookie("__forward_site", cs.originSite, cs.maxAge, "/", cs.domain, false, true)
+		ctx.SetCookie("__width_limit", cs.widthLimit+`px`, cs.maxAge, "/", cs.domain, false, true)
 	}
 	//调用responseHandlersChain上的Handlers
-	for _, r := range responseHandlersChain {
-		r.handler(ctx, res)
-		if ctx.IsAborted() {
-			return
+	if ct := res.Header.Get("Content-Type"); strings.Index(strings.ToLower(ct), "text/html") > -1 {
+		for _, r := range responseHandlersChain {
+			r.handler(ctx, res)
+			if ctx.IsAborted() {
+				return
+			}
+		}
+		for _, r := range responseHandlersChain {
+			if callback := r.deferCallbackFunc; !reflect2.IsNil(callback) {
+				(*callback)()
+			}
 		}
 	}
-	for _, r := range responseHandlersChain {
-		if callback := r.deferCallbackFunc; callback != nil {
-			(*callback)()
-		}
-	}
+
 	//没有什么callback对内容进行了写操作，就直接将response的body返回
 	if !ctx.Writer.Written() {
 		buf := new(bytes.Buffer)
 		buf.ReadFrom(res.Body)
+		//ctx.Header("Content-Length", fmt.Sprint(buf.Len()))
 		ctx.Data(res.StatusCode, res.Header.Get("Content-Type"), buf.Bytes())
 	}
 }
@@ -259,4 +277,49 @@ func (str *siteUrl) changeSupportIframeSite(support bool) (error) {
 func handleError(ctx *gin.Context, err error) {
 	ctx.Status(503)
 	fmt.Println(err)
+}
+
+func getCompleteOriginURL(ctx *gin.Context, checkSelf bool) (url string) {
+	//是否是完整的url
+	uri := ctx.Param("uri")
+	ok := isCompleteURL(uri)
+	//并非完整的url
+	if !ok {
+		//reg, _ := regexp.Compile(FirstRequestPath + `\?.*url=__https?`)
+		refer := ctx.Request.Referer()
+		var site string
+		var err error
+		//直接从cookie取
+		site, err = ctx.Cookie("__forward_site")
+		//cookie没有，尝试从refer取
+
+		if err != nil {
+			log.Println("cookie中没有site，从refer取得: ", site)
+			//先尝试是否refer的是/getForward/get接口
+			re, _ := regexp.Compile(`.*` + FirstRequestPath + `\?__url=(.*)`)
+			result := re.FindStringSubmatch(refer)
+			if len(result) >= 2 {
+				site = getHostFromUrl(result[1], true)
+			} else {
+				//如果不是，尝试直接引用refer的site
+				urlFromRefer := getHostFromUrl(refer, true)
+				site = getHostFromUrl(urlFromRefer, true)
+			}
+		}
+		url = site + uri
+		if checkSelf {
+			h := getHostFromUrl(site, false)
+			for _, self := range selfHost {
+				if h == self {
+					ctx.Status(503)
+					log.Println("error: site与本站相同", ctx.Request.Header)
+					ctx.Abort()
+				}
+			}
+		}
+	} else {
+		//是完整的url
+		url = uri
+	}
+	return url
 }

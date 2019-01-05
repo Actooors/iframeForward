@@ -36,7 +36,6 @@ type responseBodyHandlerFunc func(*gin.Context, *http.Response, *string) *string
 func (chain *ResponseHandlersChain) responseBodyUse(handlers ...responseBodyHandlerFunc) {
 	var callback func() = nil
 	hdl := ResponseHandler{handler: func(ctx *gin.Context, res *http.Response) {
-		//siteUrl := siteUrl(getHostFromUrl(res.Request.URL.String(), true))
 		buf := new(bytes.Buffer)
 		var s string
 		if ct := res.Header.Get("Content-Type"); strings.Index(strings.ToLower(ct), "text/html") > -1 {
@@ -49,9 +48,9 @@ func (chain *ResponseHandlersChain) responseBodyUse(handlers ...responseBodyHand
 				buf.ReadFrom(res.Body)
 			}
 			s = buf.String()
-			//调用handlers之前先将status置特殊值InitialStatus=1，以此监测status是否经handlers发生了变化
-			ctx.Status(InitialStatus)
 			//调用handlers
+			//先将status置特殊值InitialStatus=1，以此监测status是否经handlers发生了变化
+			ctx.Status(InitialStatus)
 			for _, handler := range handlers {
 				if r := handler(ctx, res, &s); r != nil {
 					s = *r
@@ -76,15 +75,15 @@ func (chain *ResponseHandlersChain) responseBodyUse(handlers ...responseBodyHand
 				length = len(s)
 			}
 			ctx.Header("Content-Length", fmt.Sprint(length))
+			//如果有handler对status进行了改变，则使用改变后的status，否则沿用response的status
+			if status := ctx.Writer.Status(); status == InitialStatus {
+				callback = func() { ctx.String(res.StatusCode, s) }
+			} else {
+				callback = func() { ctx.String(status, s) }
+			}
 		} else {
 			buf.ReadFrom(res.Body)
 			s = buf.String()
-		}
-		//如果有handler对status进行了改变，则使用改变后的status，否则沿用response的status
-		if status := ctx.Writer.Status(); status == InitialStatus {
-			callback = func() { ctx.String(res.StatusCode, s) }
-		} else {
-			callback = func() { ctx.String(status, s) }
 		}
 	}, deferCallbackFunc: &callback}
 	chain.responseUse(hdl)
