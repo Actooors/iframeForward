@@ -19,7 +19,7 @@ import (
 )
 
 var selfHost = []string{"0.0.0.0:8090", "api.mzz.pub:8090", "192.168.50.111:8090", "proxy.shumsg.cn", "localhost:8090"}
-var frontHost = []string{"api.mzz.pub:8000", "shumsg.cn"}
+var frontHost = []string{"www.shumsg.cn", "api.mzz.pub:8000"}
 
 const FirstRequestPath = "/getforward/get"
 const ApiRoot = "http://api.mzz.pub:8188/api"
@@ -62,7 +62,7 @@ func preHandler(ctx *gin.Context) {
 	if ctx.Request.URL.Path == "/static/seoNormalize.css" {
 		seoNormalize.mutex.Lock()
 		if seoNormalize.content == "" {
-			res, err := http.Get("https://shumsg.cn/static/seoNormalize.css")
+			res, err := http.Get("https://www.shumsg.cn/static/seoNormalize.css")
 			//res, err := http.Get("http://localhost:8688/static/seoNormalize.css")
 			if err == nil {
 				seoNormalize.header = res.Header
