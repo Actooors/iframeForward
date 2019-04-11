@@ -160,13 +160,14 @@ func anyForward(ctx *gin.Context) {
 	//将友好的response头原原本本添加回去
 	for k, v := range res.Header {
 		//log.Println("here: ", k, v)
-		switch k {
-		case "Access-Control-Allow-Origin",
-			"Access-Control-Request-Method",
-			"Host":
+		switch strings.ToLower(k) {
+		case "access-control-allow-origin",
+			"access-control-request-method",
+			"content-security-policy",
+			"host":
 			continue
 			//该站点由于有X-Frame-Options首部，因此不支持iframe，我们在数据库对它进行记录
-		case "X-Frame-Options":
+		case "x-frame-options":
 			if firstAcess {
 				go func() {
 					err := siteUrl.changeSupportIframeSite(false)
